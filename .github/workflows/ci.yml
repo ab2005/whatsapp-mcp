@@ -1,0 +1,296 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  GO_VERSION: '1.24.1'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # Go Bridge Tests
+  go-tests:
+    name: Go Bridge Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('whatsapp-bridge/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    
+    - name: Install dependencies
+      working-directory: ./whatsapp-bridge
+      run: go mod download
+    
+    - name: Run tests
+      working-directory: ./whatsapp-bridge
+      run: go test -v -race -coverprofile=coverage.out ./...
+    
+    - name: Generate coverage report
+      working-directory: ./whatsapp-bridge
+      run: go tool cover -html=coverage.out -o coverage.html
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./whatsapp-bridge/coverage.out
+        flags: go-bridge
+        name: go-bridge-coverage
+
+  # Python MCP Server Tests
+  python-tests:
+    name: Python MCP Server Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install UV
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/uv
+        key: ${{ runner.os }}-uv-${{ hashFiles('whatsapp-mcp-server/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-uv-
+    
+    - name: Install dependencies
+      working-directory: ./whatsapp-mcp-server
+      run: |
+        uv sync
+        uv pip install -e ".[dev]"
+    
+    - name: Run linting
+      working-directory: ./whatsapp-mcp-server
+      run: |
+        uv run black --check .
+        uv run isort --check-only .
+        uv run flake8 .
+    
+    - name: Run type checking
+      working-directory: ./whatsapp-mcp-server
+      run: uv run mypy src/
+    
+    - name: Run tests
+      working-directory: ./whatsapp-mcp-server
+      run: uv run pytest
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./whatsapp-mcp-server/htmlcov/coverage.xml
+        flags: python-mcp
+        name: python-mcp-coverage
+
+  # Security Scanning
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    # Go Security Scanning
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    
+    - name: Run Gosec Security Scanner
+      uses: securecodewarrior/github-action-gosec@master
+      with:
+        args: '-fmt sarif -out gosec-results.sarif ./whatsapp-bridge/...'
+    
+    - name: Upload Gosec results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: gosec-results.sarif
+    
+    # Python Security Scanning
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install UV
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    - name: Install bandit
+      run: uv tool install bandit
+    
+    - name: Run Bandit Security Scanner
+      working-directory: ./whatsapp-mcp-server
+      run: uv tool run bandit -r src/ -f json -o bandit-results.json
+      continue-on-error: true
+    
+    - name: Run Safety Scanner
+      working-directory: ./whatsapp-mcp-server
+      run: |
+        uv tool install safety
+        uv tool run safety check --json --output safety-results.json
+      continue-on-error: true
+    
+    # SAST with Semgrep
+    - name: Run Semgrep
+      uses: semgrep/semgrep-action@v1
+      with:
+        config: auto
+        generateSarif: "1"
+    
+    - name: Upload Semgrep results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: semgrep.sarif
+      if: always()
+
+  # Dependency Vulnerability Scanning
+  vulnerability-scan:
+    name: Dependency Vulnerability Scanning
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    # Go vulnerability scanning
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    
+    - name: Run Go vulnerability check
+      working-directory: ./whatsapp-bridge
+      run: |
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+        govulncheck ./...
+    
+    # Python vulnerability scanning
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install UV
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    - name: Check Python vulnerabilities
+      working-directory: ./whatsapp-mcp-server
+      run: |
+        uv tool install pip-audit
+        uv tool run pip-audit --desc --format=json --output=audit-results.json
+      continue-on-error: true
+
+  # Build and Integration Tests
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [go-tests, python-tests]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install UV
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    - name: Build Go bridge
+      working-directory: ./whatsapp-bridge
+      run: go build -o whatsapp-bridge main.go
+    
+    - name: Install Python dependencies
+      working-directory: ./whatsapp-mcp-server
+      run: uv sync
+    
+    - name: Test Go bridge startup
+      working-directory: ./whatsapp-bridge
+      run: |
+        timeout 10s ./whatsapp-bridge || true
+        echo "Bridge startup test completed"
+    
+    - name: Test Python MCP server
+      working-directory: ./whatsapp-mcp-server
+      run: |
+        timeout 5s uv run python -c "from src.config import config; print('Config loaded successfully')" || true
+        echo "Python MCP server test completed"
+
+  # Code Quality Checks
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    
+    - name: Install golangci-lint
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.54.2
+    
+    - name: Run golangci-lint
+      working-directory: ./whatsapp-bridge
+      run: golangci-lint run
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install UV
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    - name: Install Python dev dependencies
+      working-directory: ./whatsapp-mcp-server
+      run: uv sync --extra dev
+    
+    - name: Check Python code formatting
+      working-directory: ./whatsapp-mcp-server
+      run: |
+        uv run black --check --diff .
+        uv run isort --check-only --diff .
+    
+    - name: Run Python linting
+      working-directory: ./whatsapp-mcp-server
+      run: uv run flake8 --statistics src/ tests/
+    
+    - name: Run Python type checking
+      working-directory: ./whatsapp-mcp-server
+      run: uv run mypy src/

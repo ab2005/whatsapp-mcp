@@ -1,0 +1,413 @@
+openapi: 3.0.3
+info:
+  title: WhatsApp Bridge API
+  description: |
+    REST API for the WhatsApp Bridge component that handles WhatsApp Web integration.
+    This API allows sending messages, downloading media, and managing WhatsApp communications.
+  version: 1.0.0
+  contact:
+    name: WhatsApp MCP Team
+    url: https://github.com/lharries/whatsapp-mcp
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080/api
+    description: Local development server
+
+paths:
+  /send:
+    post:
+      summary: Send a message or file
+      description: Send a text message or file to a WhatsApp recipient
+      operationId: sendMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/TextMessageRequest'
+                - $ref: '#/components/schemas/FileMessageRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FileUploadRequest'
+      responses:
+        '200':
+          description: Message sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendResponse'
+        '400':
+          description: Bad request - invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /download:
+    post:
+      summary: Download media from a message
+      description: Download media file from a WhatsApp message
+      operationId: downloadMedia
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DownloadRequest'
+      responses:
+        '200':
+          description: Media downloaded successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DownloadResponse'
+        '400':
+          description: Bad request - invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Media not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      summary: Health check
+      description: Check if the API is responding
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /chats:
+    get:
+      summary: List chats
+      description: Get a list of WhatsApp chats
+      operationId: listChats
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of chats to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of chats to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of chats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatsResponse'
+
+  /messages:
+    get:
+      summary: Get messages
+      description: Get messages from a specific chat
+      operationId: getMessages
+      parameters:
+        - name: chat_jid
+          in: query
+          required: true
+          description: JID of the chat
+          schema:
+            type: string
+            pattern: '^[0-9]+(-[0-9]+)?@(s\.whatsapp\.net|g\.us)$'
+        - name: limit
+          in: query
+          description: Maximum number of messages to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of messages to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagesResponse'
+
+components:
+  schemas:
+    TextMessageRequest:
+      type: object
+      required:
+        - recipient
+        - message
+      properties:
+        recipient:
+          type: string
+          description: Phone number (10-15 digits) or JID
+          pattern: '^([0-9]{10,15}|[0-9]+(-[0-9]+)?@(s\.whatsapp\.net|g\.us))$'
+          example: "1234567890"
+        message:
+          type: string
+          description: Text message content
+          maxLength: 4096
+          example: "Hello, how are you?"
+
+    FileMessageRequest:
+      type: object
+      required:
+        - recipient
+        - file_path
+      properties:
+        recipient:
+          type: string
+          description: Phone number (10-15 digits) or JID
+          pattern: '^([0-9]{10,15}|[0-9]+(-[0-9]+)?@(s\.whatsapp\.net|g\.us))$'
+          example: "1234567890"
+        file_path:
+          type: string
+          description: Absolute path to the file to send
+          example: "/path/to/image.jpg"
+
+    FileUploadRequest:
+      type: object
+      required:
+        - recipient
+        - file
+      properties:
+        recipient:
+          type: string
+          description: Phone number (10-15 digits) or JID
+          example: "1234567890"
+        file:
+          type: string
+          format: binary
+          description: File to upload
+
+    DownloadRequest:
+      type: object
+      required:
+        - message_id
+        - chat_jid
+      properties:
+        message_id:
+          type: string
+          description: ID of the message containing media
+          example: "3EB0C767D26A1D8D6E73"
+        chat_jid:
+          type: string
+          description: JID of the chat containing the message
+          pattern: '^[0-9]+(-[0-9]+)?@(s\.whatsapp\.net|g\.us)$'
+          example: "1234567890@s.whatsapp.net"
+
+    SendResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          description: Whether the operation was successful
+        message:
+          type: string
+          description: Status message
+          example: "Message sent successfully"
+        data:
+          type: object
+          description: Additional response data
+          properties:
+            message_id:
+              type: string
+              description: ID of the sent message
+
+    DownloadResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          description: Whether the operation was successful
+        message:
+          type: string
+          description: Status message
+          example: "Media downloaded successfully"
+        file_path:
+          type: string
+          description: Local path to the downloaded file
+          example: "/app/store/media/image_123.jpg"
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          description: Error message
+          example: "Invalid recipient format"
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "healthy"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2023-01-01T12:00:00Z"
+
+    Chat:
+      type: object
+      properties:
+        jid:
+          type: string
+          description: WhatsApp JID of the chat
+          example: "1234567890@s.whatsapp.net"
+        name:
+          type: string
+          description: Display name of the chat
+          example: "John Doe"
+        last_message_time:
+          type: string
+          format: date-time
+          description: Timestamp of the last message
+          example: "2023-01-01T12:00:00Z"
+        is_group:
+          type: boolean
+          description: Whether this is a group chat
+        is_contact:
+          type: boolean
+          description: Whether this is a direct contact chat
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique message ID
+          example: "3EB0C767D26A1D8D6E73"
+        chat_jid:
+          type: string
+          description: JID of the chat containing this message
+          example: "1234567890@s.whatsapp.net"
+        sender:
+          type: string
+          description: JID of the message sender
+          example: "1234567890@s.whatsapp.net"
+        content:
+          type: string
+          description: Text content of the message
+          example: "Hello, how are you?"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the message was sent
+          example: "2023-01-01T12:00:00Z"
+        is_from_me:
+          type: boolean
+          description: Whether this message was sent by the current user
+        media_type:
+          type: string
+          description: Type of media attached (if any)
+          enum: [image, video, audio, document]
+          nullable: true
+        filename:
+          type: string
+          description: Original filename of attached media
+          nullable: true
+
+    ChatsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            chats:
+              type: array
+              items:
+                $ref: '#/components/schemas/Chat'
+            total:
+              type: integer
+              description: Total number of chats available
+            limit:
+              type: integer
+              description: Number of chats requested
+            offset:
+              type: integer
+              description: Number of chats skipped
+
+    MessagesResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: '#/components/schemas/Message'
+            total:
+              type: integer
+              description: Total number of messages available in the chat
+            limit:
+              type: integer
+              description: Number of messages requested
+            offset:
+              type: integer
+              description: Number of messages skipped
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication (future use)
+
+tags:
+  - name: messaging
+    description: Send and receive WhatsApp messages
+  - name: media
+    description: Handle media files and downloads
+  - name: chats
+    description: Manage WhatsApp chats and conversations
+  - name: health
+    description: API health and status checks

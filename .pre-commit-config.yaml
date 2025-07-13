@@ -1,0 +1,91 @@
+repos:
+  # Generic hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: detect-private-key
+      - id: check-case-conflict
+
+  # Go hooks
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+        files: '\.go$'
+        exclude: '^whatsapp-mcp-server/'
+      - id: go-vet-mod
+        files: '\.go$'
+        exclude: '^whatsapp-mcp-server/'
+      - id: go-mod-tidy
+        files: 'go\.(mod|sum)$'
+        exclude: '^whatsapp-mcp-server/'
+
+  # Python hooks
+  - repo: https://github.com/psf/black
+    rev: 23.7.0
+    hooks:
+      - id: black
+        files: '\.py$'
+        exclude: '^whatsapp-bridge/'
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        files: '\.py$'
+        exclude: '^whatsapp-bridge/'
+        args: ["--profile", "black"]
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 6.0.0
+    hooks:
+      - id: flake8
+        files: '\.py$'
+        exclude: '^whatsapp-bridge/'
+        args: 
+          - '--max-line-length=88'
+          - '--extend-ignore=E203,W503'
+
+  # Security hooks
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: '\.lock$|\.sum$'
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        files: '\.py$'
+        exclude: '^whatsapp-bridge/|tests/'
+        args: ['-c', 'whatsapp-mcp-server/.bandit']
+
+  # Go security
+  - repo: https://github.com/securecodewarrior/github-action-gosec
+    rev: v2.0.0
+    hooks:
+      - id: gosec
+        files: '\.go$'
+        exclude: '^whatsapp-mcp-server/'
+
+  # License check
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.4
+    hooks:
+      - id: insert-license
+        files: '\.(go|py)$'
+        args:
+          - --license-filepath
+          - LICENSE-HEADER.txt
+          - --comment-style
+          - //
